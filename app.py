@@ -284,7 +284,7 @@ def parse_filings_html(html):
         })
     return filings
 
-def fetch_and_enrich(date_from, date_to, progress_bar, status_text):
+def fetch_and_enrich(date_from, date_to, progress_bar, status_text, issuer_code=None):
     all_raw     = []
     seen_global = set()
 
@@ -307,6 +307,9 @@ def fetch_and_enrich(date_from, date_to, progress_bar, status_text):
                     if oldest is None or d < oldest:
                         oldest = d
                     if date_from <= d <= date_to:
+                        # Issuer filter — skip if not matching selected issuer
+                        if issuer_code and get_issuer_code(f["issuer"]) != issuer_code:
+                            continue
                         key = f["detail_url"].strip()
                         if key not in seen_global:
                             seen_global.add(key)
@@ -588,6 +591,24 @@ with tab_data:
         date_from, date_to = _preset_map[preset]
         st.caption(f"Using preset: **{preset}** → {date_from} to {date_to}")
 
+    # ── Issuer filter for fetch ───────────────────────────────
+    KNOWN_ISSUERS = {
+        "ทั้งหมด (All)": None,
+        "ธนาคารกรุงไทย (KTB · DR80)": "80",
+        "บัวหลวง (BLS · DR01)": "01",
+        "พาย (Pi · DR03)": "03",
+        "เกียรตินาคินภัทร (KKP · DR06)": "06",
+        "เคเจไอ (KGI · DR13)": "13",
+        "หยวนต้า (Yuanta · DR19)": "19",
+        "อินโนเวสท์ SCBX (DR23)": "23",
+    }
+    fetch_issuer_label = st.selectbox(
+        "Fetch issuer filter (leave All to fetch everyone)",
+        list(KNOWN_ISSUERS.keys()),
+        key="fetch_issuer_select"
+    )
+    fetch_issuer_code = KNOWN_ISSUERS[fetch_issuer_label]
+
     # Stored data info
     all_filings = st.session_state.get("filings_all", [])
     if all_filings:
@@ -602,7 +623,7 @@ with tab_data:
         else:
             pb   = st.progress(0)
             stxt = st.empty()
-            new_filings = fetch_and_enrich(date_from, date_to, pb, stxt)
+            new_filings = fetch_and_enrich(date_from, date_to, pb, stxt, issuer_code=fetch_issuer_code)
 
             # Merge with existing stored filings
             existing = st.session_state.get("filings_all", [])
