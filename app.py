@@ -259,8 +259,10 @@ def parse_filings_html(html):
                 all_links = row.find_all("a", href=True)
                 detail_url = all_links[-1]["href"] if all_links else ""
 
-        dedup_key = (issuer.strip(), first_date.strip())
-        if dedup_key in seen:
+        # Dedup within page by detail_url only (same link = exact same filing)
+        # We cannot dedup by issuer+date here — one issuer can file many DRs on same day
+        dedup_key = detail_url.strip()
+        if dedup_key and dedup_key in seen:
             continue
         seen.add(dedup_key)
 
@@ -305,7 +307,7 @@ def fetch_and_enrich(date_from, date_to, progress_bar, status_text):
                     if oldest is None or d < oldest:
                         oldest = d
                     if date_from <= d <= date_to:
-                        key = (f["issuer"].strip(), f["first_date"].strip())
+                        key = f["detail_url"].strip()
                         if key not in seen_global:
                             seen_global.add(key)
                             all_raw.append(f)
@@ -348,8 +350,28 @@ def fetch_and_enrich(date_from, date_to, progress_bar, status_text):
     return all_raw
 
 def to_dataframe(filings):
-    rows = []
+    # Post-enrichment dedup: same issuer + same underlying = duplicate (keep latest)
+    seen_und = {}
+    deduped = []
     for f in filings:
+        und = str(f.get("underlying") or "").strip()
+        issuer = str(f.get("issuer") or "").strip()
+        if und and und not in ("", "—"):
+            key = f"{issuer}__{und}"
+            if key in seen_und:
+                deduped[seen_und[key]] = f  # replace with newer/updated record
+            else:
+                seen_und[key] = len(deduped)
+                deduped.append(f)
+        else:
+            # Unknown underlying — use detail_url to avoid exact dupes only
+            url_key = f"__url__{f.get('detail_url', '')}"
+            if url_key not in seen_und:
+                seen_und[url_key] = len(deduped)
+                deduped.append(f)
+
+    rows = []
+    for f in deduped:
         underlying = str(f.get("underlying") or "—").strip()
         if underlying.startswith("1.") or underlying.startswith("2.") or underlying.startswith("3."):
             underlying = "—"
